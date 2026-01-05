@@ -1,0 +1,16 @@
+<launch>
+    <!--  ************** MPC Node **************  -->
+    <node name="MPC_tracking" pkg="mpc_ros" type="tracking_reference_trajectory_plan" output="screen" >
+        <rosparam file="$(find planner_param)/sim/mpc_sim.yaml" command="load" />
+
+        <remap from="desired_path" to="/planner/traj_whole"/> 
+        <remap from="/odom" to="/odom"/>
+        <!-- <remap from="cmd_vel" to= "cmd_vel1"/> -->
+        <!-- <remap from="/odom" to="/odometry"/> -->
+
+        <remap from="/move_base_simple/goal" to="/11111"/>
+        <!-- <remap from="/cmd_vel" to="/JA01/jackal_velocity_controller/cmd_vel"/> -->
+
+    </node>
+
+</launch>

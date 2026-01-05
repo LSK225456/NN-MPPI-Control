@@ -1,0 +1,33 @@
+#### lsk
+# Parameters for control loop
+pub_twist_cmd: true                                                   # 是否发布 geometry_msgs/Twist 类型的速度指令。
+debug_info: false                                                           # 是否输出调试信息。                         
+delay_mode: false                                                         # 是否启用延时补偿模式。MPC的一个巨大优势就是可以主动补偿系统中的延时（例如，从计算出指令到电机实际响应的延时）。
+max_speed: 1                                                                  # unit: m/s 
+waypoints_dist: -1.0                                                     # unit: m, 在路径上进行插值时，两个相邻参考点之间的期望距离。当设置为负数（如-1.0）时，由节点根据其他参数（如速度）自动计算。
+path_length: 3.0                                                             # unit: m, MPC的预测视界长度。
+goal_radius: 0.5                                                              # unit: m，当车辆与最终目标点的距离小于这个值时，认为任务完成。
+controller_freq: 10                                                         # unit: Hz, 控制器的频率。
+
+# Parameter for MPC solver
+mpc_steps: 30.0                                                             # 预测步数 N。表示在预测视界内，将轨迹离散化成多少个时间步。预测时长 = mpc_steps * dt（dt是求解器内部的时间步长，通常由controller_freq决定）。
+mpc_ref_cte: 0.0                                                            # 目标横向跟踪误差，希望为0。
+mpc_ref_vel: 1                                                               # 目标跟踪速度（m/s）。这是MPC努力去维持的速度。
+mpc_ref_etheta: 0.0                                                     # 目标朝向误差，希望为0。
+
+mpc_w_cte: 500.0                                                      # 对“偏离路径”的惩罚。调大: MPC会不惜一切代价（比如大幅度转向）紧紧贴着参考路径走。在弯道上会更准，但可能导致转向非常“神经质”。调小: 允许车辆在一定程度上偏离路径以换取更平滑的控制（比如“切弯”），舒适性更好。
+mpc_w_etheta: 200                                       # 对“车头方向与路径切线方向不一致”的惩罚。调大: 迫使车头快速对齐路径方向，过弯更“甩”，但可能导致超调和震荡。调小: 允许车头与路径存在一定夹角（漂移），过弯更平滑，但跟踪精度可能下降。
+mpc_w_vel: 50.0                                                         # 调大: MPC会更积极地加减速来精确保持在 mpc_ref_vel。
+mpc_w_angvel: 2000.0                                                  # 调大: MPC会倾向于尽量少打方向盘，或者打的方向盘角度尽量小。会使转向变得非常平滑、柔和。调小: MPC会觉得打方向盘“没有成本”，从而做出非常迅速和剧烈的转向动作。
+mpc_w_angvel_d: 2000.0                                            # 调大: 迫使方向盘的转动非常缓慢、线性，极大提升乘坐舒适性，防止“急打方向”。调小: 允许方向盘瞬间从左打满到右打满，动作非常快，但会很颠簸。
+mpc_w_accel: 10.0                                                       # 调大: 倾向于使用更小的油门和刹车，加减速过程更柔和,保持在一个较低的加速度状态。调小: 允许更剧烈的加减速来快速达到目标速度,更大加速度
+mpc_w_accel_d: 10.0                                                  # 调大: 车辆的加速和减速过程会非常平滑，极大提升舒适性，防止“一脚油门”或“一脚刹车”，加加速度更小。调小: 允许瞬间的油门/刹车变化。
+mpc_w_cte_int: 500                                                  # 积分累计横向误差参数
+
+
+mpc_max_angvel: 3                                                       # 车辆转向角的最大物理限制。应根据您的车辆实际最大转向角来设置（换算成弧度）。
+mpc_max_throttle: 5.0                                                 # 车辆能提供的最大加速度。
+mpc_bound_value: 1.0e3                                            # Bound value for other variables
+
+odom_frame: map                    # 定位话题使用的坐标系,ndt是map，sc是odom
+car_frame: base_link                  # 发布mpc_trajectory话题的坐标系

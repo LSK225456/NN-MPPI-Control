@@ -1,0 +1,21 @@
+<launch>
+    <arg name="bag_path" default="$(find mlp_train)/data/train_bag/7801_ndt_teb_9.bag"/>
+    <arg name="out_path" default="$(find mlp_train)/data/train_data/experiment_9.pt"/>
+
+    <arg name="batch_input_dir" default="/home/lsk1804/lsk_graduate/lsk_ws/src/mlp_train/data/train_bag/"/> 
+    <arg name="batch_output_dir" default="/home/lsk1804/lsk_graduate/lsk_ws/src/mlp_train/data/train_data/"/>
+
+    <node pkg="mlp_train" type="data_process.py" name="dataset_builder_node" output="screen" 
+          args="--in_dir $(arg batch_input_dir) --out_dir $(arg batch_output_dir)">
+          
+        <param name="topics/odom"  value="/odom"/>
+        <param name="topics/wheel" value="/wheel_odom"/>
+        <param name="topics/cmd"   value="/cmd_vel"/>
+
+        <param name="thresholds/filter_stationary" value="true"/>
+        <param name="thresholds/min_lin_vel" value="0.01"/>
+        <param name="thresholds/min_ang_vel" value="0.01"/>
+
+        <param name="model/dt_tolerance" value="0.3"/>
+    </node>
+</launch>

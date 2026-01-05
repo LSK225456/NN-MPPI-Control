@@ -1,0 +1,51 @@
+<launch>
+     <arg name="controller"      default="mpc"   doc="opt: dwa, mpc, pure_pursuit"/>
+     <arg name="trajectory_type" default="line"  doc="opt: line, curve"/>
+
+
+    <node name="global_path_generator" pkg="mpc_ros" type="mpc_trajectory_generation.py" output="screen" if="$(eval controller == 'mpc')">
+        
+        <param name="trajectory_type" value="$(arg trajectory_type)" />
+
+        <param name="line_length" value="50.0" />
+        <param name="num_points"  value="2000" />
+        
+        <param name="goal_offset_x" value="15.0" />
+        <param name="goal_offset_y" value="-9.0" />
+
+        <param name="turning_radius"  type="double" value="5.0" />    
+        <param name="sampling_step"   type="double" value="0.002" />   
+        <param name="max_adjust_iter" type="int"    value="100" />    
+        <param name="adjust_factor"   type="double" value="0.9" />    
+    </node>
+
+     <!-- <node name="MPC_tracking" pkg="mpc_ros" type="tracking_reference_trajectory_plan" output="screen" if="$(eval controller == 'mpc')">
+         <rosparam file="$(find mpc_ros)/params/mpc_test_scout.yaml" command="load" />
+     </node> -->
+
+     <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mpc_ros)/rviz/rviz_navigation.rviz"/>
+
+</launch>
+
+
+
+
+
+
+<!-- <launch>
+     <arg name="controller"  default="mpc" doc="opt: dwa, mpc, pure_pursuit"/>
+     <arg name="trajectory_type"  default="line" doc="opt: circle, epitrochoid, square, infinite"/>
+
+
+     <node name="mpc_trajectory_generation" pkg="mpc_ros" type="mpc_trajectory_generation.py"  if="$(eval controller == 'mpc')" output="screen">
+         <param name="trajectory_type" value="$(arg trajectory_type)" />
+         <remap from="/odom" to="/odom"/>
+     </node>
+
+     <node name="MPC_tracking" pkg="mpc_ros" type="tracking_reference_trajectory" output="screen" if="$(eval controller == 'mpc')">
+         <rosparam file="$(find mpc_ros)/params/mpc_test_scout.yaml" command="load" />
+         </node>
+
+     <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mpc_ros)/rviz/rviz_navigation.rviz"/>
+
+ </launch> -->

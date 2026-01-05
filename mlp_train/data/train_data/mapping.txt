@@ -1,0 +1,9 @@
+experiment_1.pt: 7801_ndt_teb_8.bag
+experiment_2.pt: 7801_ndt_teb_9.bag
+experiment_3.pt: control_6.bag
+experiment_4.pt: control_7.bag
+experiment_5.pt: mpc_1.bag
+experiment_6.pt: mpc_2.bag
+experiment_7.pt: mpc_3.bag
+experiment_8.pt: mpc_4.bag
+experiment_9.pt: teb_5.bag

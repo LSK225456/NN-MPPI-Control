@@ -1,0 +1,38 @@
+<launch>
+<arg name="x_pos" default="0"/>
+    <arg name="y_pos" default="0"/>
+    <arg name="z_pos" default="0"/>
+    <arg name="yaw" default="0"/>
+
+    <arg name="world_name" default="empty.world"/>  
+    <include file="$(find gazebo_ros)/launch/empty_world.launch">
+        <arg name="world_name" value="$(find scout_simulator)worlds/$(arg world_name)"/>
+        <arg name="paused" value="false"/>
+        <arg name="use_sim_time" value="true"/>
+        <arg name="gui" value="true"/>
+        <arg name="headless" value="false"/>
+        <arg name="debug" value="false"/>
+    </include>
+
+    <include file="$(find scout_simulator)/launch/spawn_model.launch">
+        <arg name="x_pos" value="$(arg x_pos)"/>
+        <arg name="y_pos" value="$(arg y_pos)"/>
+        <arg name="z_pos" value="$(arg z_pos)"/>
+        <arg name="yaw" value="$(arg yaw)"/>
+    </include>
+    <node name="controller_spawner" pkg="controller_manager" type="spawner" respawn="true" output="screen" args="scout_state_controller scout_motor_fr_controller scout_motor_fl_controller scout_motor_rl_controller scout_motor_rr_controller"/>
+
+    <node  name="ground_truth_to_tf" pkg="message_to_tf" type="message_to_tf" output="screen">
+        <param name="odometry_topic" value="ground_truth/state" />
+        <param name="frame_id" value="/world" />
+        <param name="tf_prefix" value="/" />
+    </node>
+
+    <node pkg="rqt_robot_steering" type="rqt_robot_steering" name="rqt_robot_steering" respawn="true">
+    <param name="default_topic" value="cmd_vel"/>                         <!-- default velocity control topic name -->
+    <param name="default_vx_max" value="1.0"/>                        <!-- linear velocity max value    m/s -->
+    <param name="default_vx_min" value="-1.0"/>                       <!-- linear velocity min value    m/s-->
+    <param name="default_vw_max" value="0.69"/>                    <!-- angular velocity max value  rad/s (adaptor for urdf joint limit) -->
+    <param name="default_vw_min" value="-0.69"/>                   <!-- angular velocity min value  rad/s (adaptor for urdf joint limit) -->
+    </node> 
+</launch>

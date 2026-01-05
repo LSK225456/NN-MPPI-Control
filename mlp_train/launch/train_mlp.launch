@@ -1,0 +1,22 @@
+<launch>
+    <arg name="input_dataset_dir" default="/home/lsk1804/lsk_graduate/lsk_ws/src/mlp_train/data/train_data/" />
+    
+    <arg name="output_result_dir" default="$(find mlp_train)/data/models/version_1202" />
+    
+    <arg name="model_filename" default="best_mlp_model" />
+
+    <node pkg="mlp_train" type="train_mlp.py" name="mlp_trainer_node" output="screen">
+                      
+        <param name="dataset/input_dir"  value="$(arg input_dataset_dir)" />
+        <param name="dataset/output_dir" value="$(arg output_result_dir)" />
+        <param name="dataset/model_name" value="$(arg model_filename)" />
+        
+        <rosparam param="split/ratio">[0.7, 0.1, 0.2]</rosparam>
+
+        <param name="training/batch_size" value="256" />
+        <param name="training/learning_rate" value="0.001" /> 
+        <param name="training/epochs" value="500" />
+        <param name="training/early_stop_patience" value="30" /> 
+        
+    </node>
+</launch>

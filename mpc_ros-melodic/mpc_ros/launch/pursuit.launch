@@ -1,0 +1,26 @@
+<launch>
+    <arg name="model"  default="serving_bot" doc="opt: serving_bot"/> 
+    <arg name="trajectory_type"  default="circle" doc="opt: circle, epitrochoid, square, infinite"/> 
+
+    <!--  ************** Reference trajectory generation **************  -->
+    <!-- <node name="mpc_trajectory_generation" pkg="mpc_ros" type="mpc_trajectory_generation.py"  output="screen">
+        <param name="trajectory_type" value="$(arg trajectory_type)" />
+        <remap from="/odom" to="/ground_truth/state"/>
+    </node> -->
+    <node name="mpc_trajectory_generation" pkg="mpc_ros" type="mpc_trajectory_generation.py" output="screen">
+        <param name="trajectory_type" value="$(arg trajectory_type)" />
+        <remap from="/odom" to="/odom"/>
+    </node>
+    <!--  ************** MPC Node **************  -->
+    <node name="Pure_Pursuit" pkg="mpc_ros" type="Pure_Pursuit" output="screen">
+        <!-- <remap from="/odom" to="/odometry"/> -->
+        <!-- <remap from="/cmd_vel" to="/cmd_v"/> -->
+        <remap from="/odom" to="/odom"/>
+        <remap from="desired_path" to="/desired_path"/> 
+        <rosparam file="$(find mpc_ros)/params/pure_pursuit_params.yaml" command="load" />
+    </node>
+
+    <!--  ************** Visualisation **************  -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mpc_ros)/rviz/rviz_navigation.rviz"/>
+
+</launch>

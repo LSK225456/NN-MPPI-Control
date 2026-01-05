@@ -1,0 +1,27 @@
+<launch>
+    <!--  ************** Global Parameters ***************  -->
+    <arg name="controller"  default="mpc" doc="opt: dwa, mpc, pure_pursuit"/> 
+    <arg name="model"  default="serving_bot" doc="opt: serving_bot"/> 
+    <arg name="trajectory_type"  default="circle" doc="opt: circle, epitrochoid, square, infinite"/> 
+    <arg name="gui" default="false"/>
+     <include file="$(find scout_bringup)/launch/scout_minimal_uart_for_plan.launch"/>
+    
+
+    <!--  ************** Reference trajectory generation **************  -->
+    <node name="mpc_trajectory_generation" pkg="mpc_ros" type="mpc_trajectory_generation.py"  if="$(eval controller == 'mpc')" output="screen">
+        <param name="trajectory_type" value="$(arg trajectory_type)" />
+        <remap from="/odom" to="/wheel_odom"/>
+    </node>
+
+    <!--  ************** MPC Node **************  -->
+    <node name="MPC_tracking" pkg="mpc_ros" type="tracking_reference_trajectory" output="screen" if="$(eval controller == 'mpc')">
+        <remap from="/odom" to="/wheel_odom"/>
+        <rosparam file="$(find mpc_ros)/params/mpc_test_scout.yaml" command="load" />
+    </node>
+
+    <!--  ************** Visualisation **************  -->
+    <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mpc_ros)/rviz/rviz_navigation.rviz"/>
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="odom112world" args="0.0 0 0.0 0 0 0 world odom_111"/>
+
+</launch>

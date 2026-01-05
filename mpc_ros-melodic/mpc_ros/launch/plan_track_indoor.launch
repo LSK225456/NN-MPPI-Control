@@ -1,0 +1,21 @@
+<launch>
+    <!--  ************** Global Parameters ***************  -->
+    <arg name="controller"  default="mpc" doc="opt: dwa, mpc, pure_pursuit"/> 
+     <!-- <include file="$(find scout_bringup)/launch/scout_minimal_uart_for_plan.launch"/> -->
+
+    <!--  ************** MPC Node **************  -->
+    <node name="MPC_tracking" pkg="mpc_ros" type="tracking_reference_trajectory_plan" output="screen" if="$(eval controller == 'mpc')" >
+        <!-- <rosparam file="$(find mpc_ros)/params/mpc_local_square_params_indoor.yaml" command="load" /> -->
+        <rosparam file="$(find planner_param)/indoor/mpc_indoor.yaml" command="load" />
+        <remap from="desired_path" to="/planner/traj_whole"/> 
+        <remap from="/odom" to="/odometry"/>
+        <!-- <remap from="/odom" to="/JA01/jackal_velocity_controller/odom"/> -->
+
+        <remap from="/move_base_simple/goal" to="/11111"/>
+        <!-- <remap from="/cmd_vel" to="/JA01/jackal_velocity_controller/cmd_vel"/> -->
+        <!--rosparam file="$(find mpc_ros)/params/mpc_local_params.yaml" command="load" /-->
+        <!--rosparam file="$(find mpc_ros)//params/mpc_local_epitrochoid_params.yaml" command="load" /-->
+    </node>
+
+
+</launch>

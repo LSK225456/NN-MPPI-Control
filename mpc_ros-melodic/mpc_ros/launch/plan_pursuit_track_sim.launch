@@ -1,0 +1,17 @@
+<launch>
+    <!--  ************** Pure_Pursuit Node **************  -->
+    <node name="Pure_Pursuit" pkg="mpc_ros" type="Pure_Pursuit" output="screen" >
+
+        <remap from="desired_path" to="/planner/traj_whole"/> 
+        <remap from="/odom" to="/ground_truth/state"/>
+        <!-- <remap from="cmd_vel" to= "cmd_vel1"/> -->
+        <!-- <remap from="/odom" to="/odometry"/> -->
+         <remap from="/odom" to="/ground_truth/state"/>
+        <rosparam file="$(find mpc_ros)/params/pure_pursuit_params.yaml" command="load" />
+
+        <remap from="/move_base_simple/goal" to="/11111"/>
+        <!-- <remap from="/cmd_vel" to="/JA01/jackal_velocity_controller/cmd_vel"/> -->
+
+    </node>
+
+</launch>
