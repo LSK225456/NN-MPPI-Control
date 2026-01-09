@@ -9,6 +9,8 @@ import numpy as np
 from nav_msgs.msg import Path, Odometry
 from geometry_msgs.msg import PoseStamped, PointStamped, TransformStamped, Pose, Twist, Point
 
+from tf.transformations import quaternion_from_euler, euler_matrix
+
 # 数学库导入
 from math import sqrt, pow, cos, sin, atan2, pi
 
@@ -24,7 +26,8 @@ odom_path = Path()      # 记录机器人实际轨迹
 desired_path = Path()   # 将在启动时被一次性计算并填充，之后不再改变
 robot_odom = Odometry() # 存储最新的里程计信息
 odom_count = 0
-id = "map"            # 所有路径的坐标系
+planning_frame = "map"   # 默认值，会被 launch 参数覆盖
+car_frame = "base_link"  # 默认值，会被 launch 参数覆盖
 
 tf_buffer = None      
 tf_listener = None    
@@ -58,18 +61,18 @@ def odom_cb(data):
         # 2. 使用 tf_buffer.transform() 进行坐标变换
         #    目标坐标系是全局变量 id, 即 "map"
         #    我们给一个短暂的超时时间，以应对轻微的同步问题
-        target_pose = tf_buffer.transform(original_pose, id, rospy.Duration(0.1))
+        target_pose = tf_buffer.transform(original_pose, planning_frame, rospy.Duration(0.1))
 
         # 3. 将正确变换后的位姿追加到我们的路径中
         odom_path.header.stamp = rospy.Time.now()
-        odom_path.header.frame_id = id  # 路径的 frame_id 也是 "map"
+        odom_path.header.frame_id = planning_frame
         odom_path.poses.append(target_pose)
         
         odom_path_pub.publish(odom_path)
 
     except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
         # 如果 tf 变换查询失败 (例如 tf 树尚未连接)，打印警告信息，避免程序崩溃
-        rospy.logwarn("坐标变换失败，从 '%s' 到 '%s': %s", data.header.frame_id, id, e)
+        rospy.logwarn("坐标变换失败，从 '%s' 到 '%s': %s", data.header.frame_id, planning_frame, e)
 
 
 
@@ -84,59 +87,22 @@ def publish_desired_path(event):
         desired_path_pub.publish(desired_path)
 
 
-# def transformStamped2Matrix(transform_stamped):
-#     """
-#     将TransformStamped消息转换为4x4的齐次变换矩阵
-#     """
-#     translation = (transform_stamped.transform.translation.x,
-#                    transform_stamped.transform.translation.y,
-#                    transform_stamped.transform.translation.z)
-#     quaternion = (transform_stamped.transform.rotation.x,
-#                   transform_stamped.transform.rotation.y,
-#                   transform_stamped.transform.rotation.z,
-#                   transform_stamped.transform.rotation.w)
-#     matrix = tf.transformations.quaternion_matrix(quaternion)
-#     matrix[:3, 3] = translation
-#     return matrix
-
-# def get_initial_transform():
-#     """
-#     成功时返回base2world矩阵,否则在ROS关闭时返回None。
-#     """
-#     buffer = tf2_ros.Buffer()
-#     listener = tf2_ros.TransformListener(buffer)
-#     rate = rospy.Rate(1.0)
-    
-#     rospy.loginfo("Waiting for transform from 'map' to 'base_link'...")
-#     while not rospy.is_shutdown():
-#         try:
-#             tfs = buffer.lookup_transform("map", "base_link", rospy.Time(0), rospy.Duration(1.0))
-#             base2world = transformStamped2Matrix(tfs)
-#             rospy.loginfo("Successfully got the initial transform.")
-#             return base2world # 获取成功，返回矩阵
-#         except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException) as e:
-#             rospy.logwarn("Could not get transform: %s. Retrying...", e)
-#             rate.sleep()
-#             continue
-#     return None
-
-# ======================= todo：0910 新增代码 STARTS ==========================
-# 使用一个更稳健的新函数替换上面删除的两个函数
 def get_initial_transform():
     """
     成功时返回base2world矩阵,否则在ROS关闭时返回None。
     此版本使用经典的 tf 库，先等待再查询，启动时更稳定。
     """
     listener = tf.TransformListener()
-    target_frame = "map"
-    source_frame = "base_link"
+    # 12.16 修改: 替换硬编码，使用全局变量
+    target_frame = planning_frame 
+    source_frame = car_frame
     
     rospy.loginfo("Waiting for transform from '%s' to '%s'..." % (target_frame, source_frame))
   
     # 步骤 1: 使用 waitForTransform 明确等待TF树连接成功
     try:
         # 等待最多100秒，直到变换关系可用
-        listener.waitForTransform(target_frame, source_frame, rospy.Time(0), rospy.Duration(10.0))
+        listener.waitForTransform(target_frame, source_frame, rospy.Time(0), rospy.Duration(100.0))
         rospy.loginfo("Transform is available. Getting initial pose.")
     except (tf.Exception) as e:
         rospy.logerr("Could not get transform from '%s' to '%s' after 100s: %s", target_frame, source_frame, e)
@@ -164,6 +130,18 @@ def generate_path(base2world):
     它会修改全局变量 desired_path。
     """
     global desired_path # 明确指出要修改全局的 desired_path
+
+    # 12.17 新增：读取角度偏差参数并修正初始位姿矩阵
+    # 原理：如果baselink偏左(正)，我们需要将生成路径的基准向右(负)旋转，以对齐物理车头
+    heading_offset_deg = rospy.get_param('~heading_offset_deg', 0.0)
+    if abs(heading_offset_deg) > 0.001:
+        rospy.loginfo("Applying heading offset correction: %.2f degrees", heading_offset_deg)
+        offset_rad = heading_offset_deg * (pi / 180.0)
+        # 生成绕Z轴旋转的修正矩阵，注意这里取负号进行反向补偿
+        correction_matrix = euler_matrix(0, 0, -offset_rad)
+        # 将修正矩阵应用到基准变换中 (base2world * correction)
+        base2world = np.dot(base2world, correction_matrix)
+    # 12.17 修改结束
     
     trajectory_type = rospy.get_param('~trajectory_type', 'line')
     
@@ -171,7 +149,7 @@ def generate_path(base2world):
         rospy.loginfo("Generating a single straight-line path...")
         line_length = rospy.get_param('~line_length', 10.0) 
         num_points = rospy.get_param('~num_points', 1000)  
-        desired_path.header.frame_id = id
+        desired_path.header.frame_id = planning_frame
         
         for t in range(num_points):
             pose = PoseStamped()
@@ -189,7 +167,7 @@ def generate_path(base2world):
                 qua = [0.0, 0.0, 0.0, 1.0]  # 使用单位四元数
 
             pose.header.seq = t
-            pose.header.frame_id = id
+            pose.header.frame_id = planning_frame
             pose.pose.position.x = trans[0]
             pose.pose.position.y = trans[1]
             pose.pose.position.z = trans[2]
@@ -225,7 +203,7 @@ def generate_path(base2world):
         bezier_poses = _generate_bezier_poses(start_pose, end_pose)
 
         # 3. 将生成的路径点添加到全局路径中
-        desired_path.header.frame_id = id
+        desired_path.header.frame_id = planning_frame
         desired_path.poses = bezier_poses
         
         rospy.loginfo("Curve path generated with %d poses.", len(desired_path.poses))
@@ -239,15 +217,18 @@ def setup_ros_communications():
     # 明确指出要初始化全局的发布者和订阅者变量
     global desired_path_pub, odom_path_pub, error_path_pub, odom_sub
 
+    topic_global_path = rospy.get_param('~topic_global_path', '/desired_path')
+    topic_odom = rospy.get_param('~topic_odom', '/odom')
     # 设置所有的发布者和订阅者
-    desired_path_pub = rospy.Publisher('/desired_path', Path, queue_size=10)
+    desired_path_pub = rospy.Publisher(topic_global_path, Path, queue_size=10)
     odom_path_pub = rospy.Publisher('/recorded_path', Path, queue_size=10)
     error_path_pub = rospy.Publisher('/error_path', Path, queue_size=10)
-    odom_sub = rospy.Subscriber('/odometry/imu', Odometry, odom_cb)
+    odom_sub = rospy.Subscriber(topic_odom, Odometry, odom_cb)
     
     # 使用定时器独立、周期性地发布期望路径
-    rospy.Timer(rospy.Duration(0.1), publish_desired_path)
-
+    rospy.Timer(rospy.Duration(1), publish_desired_path)
+    # publish_desired_path
+    
 
 
 ###  ----------------贝塞尔曲线-----------------  ###
@@ -339,7 +320,7 @@ def _generate_bezier_poses(start_pose, end_pose):
     poses_list = []
     for t in np.arange(0, 1.0, dt_):
         pose = PoseStamped()
-        pose.header.frame_id = id
+        pose.header.frame_id = planning_frame
         pose.header.stamp = rospy.Time.now()
         pose.pose.position = _bezier_interpolate(p0, p1, p2, p3, t)
         
@@ -358,7 +339,7 @@ def _generate_bezier_poses(start_pose, end_pose):
     
     # 强制添加终点以确保精度
     final_pose = PoseStamped()
-    final_pose.header.frame_id = id
+    final_pose.header.frame_id = planning_frame
     final_pose.header.stamp = rospy.Time.now()
     final_pose.pose = end_pose
     poses_list.append(final_pose)
@@ -373,6 +354,11 @@ if __name__ == '__main__':
     rospy.init_node('path_generator_node')
     rospy.loginfo("Path Generator Node Started.")
     
+    planning_frame = rospy.get_param('~planning_frame', 'world')
+    car_frame = rospy.get_param('~car_frame', 'base_link')
+    
+    rospy.loginfo("Using Planning Frame: %s, Car Frame: %s", planning_frame, car_frame)
+
     global tf_buffer, tf_listener
     tf_buffer = tf2_ros.Buffer()
     tf_listener = tf2_ros.TransformListener(tf_buffer)

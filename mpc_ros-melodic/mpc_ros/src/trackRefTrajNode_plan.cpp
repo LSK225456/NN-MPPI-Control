@@ -60,6 +60,17 @@ class MPCNode
     private:
         ros::NodeHandle _nh;
         ros::Subscriber _sub_odom, _sub_gen_path, _sub_path, _sub_goal, _sub_amcl;
+        ros::Subscriber _sub_wheel_odom; // 1104 订阅这个话题的速度信息
+        nav_msgs::Odometry _wheel_odom; // 1104 新增轮式里程计数据存储
+        ros::Subscriber _sub_odom_path; // 1105 新增：用于历史轨迹记录的odom订阅者
+        ros::Publisher _pub_odom_path_history; // 1105 新增：历史轨迹发布者
+        nav_msgs::Path _odom_path_history; // 1105 新增：存储历史轨迹
+        ros::Publisher _pub_cte_error; //1112 新增：横向误差发布者
+        std_msgs::Float32 _cte_error_msg; //1112 新增：横向误差消息     
+
+        double _laser2base; // 1106：laser2base坐标变换，雷达在车体前方X方向的距离
+
+        unsigned int _odom_count;
         ros::Publisher _pub_totalcost, _pub_ctecost, _pub_ethetacost,_pub_odompath, _pub_twist, _pub_ackermann, _pub_mpctraj;
         ros::Timer _timer1;
         tf::TransformListener _tf_listener;
@@ -70,14 +81,22 @@ class MPCNode
 	//ackermann_msgs::AckermannDriveStamped _ackermann_msg;
         geometry_msgs::Twist _twist_msg;
 
-        string _globalPath_topic, _goal_topic;
-        string _map_frame, _odom_frame, _car_frame;
+        // string _globalPath_topic, _goal_topic;
+        // string _map_frame, _odom_frame, _car_frame;
+
+        string _topic_global_path, _topic_goal, _topic_odom; // 新增
+        string _planning_frame, _car_frame;                  // 新增: _planning_frame 统一替代 map/odom frame
 
         MPC _mpc;
         map<string, double> _mpc_params;
         double _mpc_steps, _ref_cte, _ref_etheta, _ref_vel, _w_cte, _w_etheta, _w_vel, 
                _w_angvel, _w_accel, _w_angvel_d, _w_accel_d, _max_angvel, _max_throttle, _bound_value;
+        double _heading_offset_deg; // 12.17 新增：存储角度偏差参数
+
         double _w_cte_int;  //1026
+        double _integ_decay, _integ_max, _integ_v_thresh;
+        double _prev_cte;   // 用于过零检测，存储上一时刻的cte
+        double _min_ref_vel, _v_ref_cte_k, _v_ref_etheta_k;     //新增自适应参考速度参数变量
 
         //double _Lf; 
         double _dt, _w, _throttle, _speed, _max_speed;
@@ -93,7 +112,9 @@ class MPCNode
         void desiredPathCB(const nav_msgs::Path::ConstPtr& pathMsg);
         void goalCB(const geometry_msgs::PoseStamped::ConstPtr& goalMsg);
         void amclCB(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& amclMsg);
+        void wheelOdomCB(const nav_msgs::Odometry::ConstPtr& wheelOdomMsg); // 1104
         void controlLoopCB(const ros::TimerEvent&);
+        void odomPathCB(const nav_msgs::Odometry::ConstPtr& odomMsg); // 1105 新增：历史轨迹回调函数
         void goalReachedJudge();
         //For making global planner
         nav_msgs::Path _gen_path;
@@ -123,8 +144,9 @@ MPCNode::MPCNode()
     pn.param("goal_radius", _goalRadius, 0.5); // unit: m
     pn.param("controller_freq", _controller_freq, 10);
     //pn.param("vehicle_Lf", _Lf, 0.290); // distance between the front of the vehicle and its center of gravity
-    _dt = double(1.0/_controller_freq); // time step duration dt in s 
-
+    // _dt = double(1.0/_controller_freq); // time step duration dt in s 
+    _dt = 0.1;
+    
     //Parameter for MPC solver
     pn.param("mpc_steps", _mpc_steps, 20.0);
     pn.param("mpc_ref_cte", _ref_cte, 0.0);
@@ -137,17 +159,32 @@ MPCNode::MPCNode()
     pn.param("mpc_w_angvel_d", _w_angvel_d, 10.0);
     pn.param("mpc_w_accel", _w_accel, 50.0);
     pn.param("mpc_w_accel_d", _w_accel_d, 10.0);
+    pn.param("heading_offset_deg", _heading_offset_deg, 0.0);
+
     pn.param("mpc_w_cte_int", _w_cte_int, 200.0);   //1026:参数读取
+    pn.param("mpc_integ_decay", _integ_decay, 0.95);
+    pn.param("mpc_integ_max", _integ_max, 2.0);
+    pn.param("mpc_integ_v_thresh", _integ_v_thresh, 0.1);
+
+    pn.param("mpc_min_ref_vel", _min_ref_vel, 0.1);
+    pn.param("mpc_v_ref_cte_k", _v_ref_cte_k, 1.5);       // 对应公式中的横向误差系数
+    pn.param("mpc_v_ref_etheta_k", _v_ref_etheta_k, 1.0); // 对应公式中的角度误差系数
 
     pn.param("mpc_max_angvel", _max_angvel, 3.0); // Maximal angvel radian (~30 deg)
     pn.param("mpc_max_throttle", _max_throttle, 1.0); // Maximal throttle accel
     pn.param("mpc_bound_value", _bound_value, 1.0e3); // Bound value for other variables
+    pn.param("laser2base", _laser2base, 0.38);           // 1106：laser2base坐标变换
 
     //Parameter for topics & Frame name
-    pn.param<std::string>("global_path_topic", _globalPath_topic, "/move_base/TrajectoryPlannerROS/global_plan" );
-    pn.param<std::string>("goal_topic", _goal_topic, "/move_base_simple/goal" );
-    pn.param<std::string>("map_frame", _map_frame, "map" ); //*****for mpc, "odom"
-    pn.param<std::string>("odom_frame", _odom_frame, "odom");
+    // pn.param<std::string>("global_path_topic", _globalPath_topic, "/move_base/TrajectoryPlannerROS/global_plan" );
+    // pn.param<std::string>("goal_topic", _goal_topic, "/move_base_simple/goal" );
+    // pn.param<std::string>("map_frame", _map_frame, "map" ); //*****for mpc, "odom"
+    // pn.param<std::string>("odom_frame", _odom_frame, "map");
+    // 加载话题和坐标系参数
+    pn.param<std::string>("topic_global_path", _topic_global_path, "/desired_path"); 
+    pn.param<std::string>("topic_goal", _topic_goal, "/move_base_simple/goal");
+    pn.param<std::string>("topic_odom", _topic_odom, "/odom");
+    pn.param<std::string>("planning_frame", _planning_frame, "map"); // 统一的规划坐标系
     pn.param<std::string>("car_frame", _car_frame, "base_link" );
 
     //Display the parameters
@@ -164,14 +201,17 @@ MPCNode::MPCNode()
     cout << "mpc_max_angvel: "  << _max_angvel << endl;
 
     //Publishers and Subscribers
-    _sub_odom   = _nh.subscribe("/odometry/imu", 1, &MPCNode::odomCB, this);        //todo:之前是/odom
-    _sub_path   = _nh.subscribe( _globalPath_topic, 1, &MPCNode::pathCB, this);
-    _sub_gen_path   = _nh.subscribe( "/desired_path", 1, &MPCNode::desiredPathCB, this);//
-    _sub_goal   = _nh.subscribe( _goal_topic, 1, &MPCNode::goalCB, this);
+    _sub_odom   = _nh.subscribe(_topic_odom, 1, &MPCNode::odomCB, this);        //todo:之前是/odom
+    _sub_wheel_odom = _nh.subscribe("/wheel_odom", 1, &MPCNode::wheelOdomCB, this); // 1104 新增轮式里程计订阅来获取速度
+   
+    _sub_gen_path   = _nh.subscribe(_topic_global_path, 1, &MPCNode::desiredPathCB, this);//todo16
+    // _sub_goal   = _nh.subscribe(_goal_topic, 1, &MPCNode::goalCB, this);
     _sub_amcl   = _nh.subscribe("/amcl_pose", 5, &MPCNode::amclCB, this);
+    _sub_odom_path = _nh.subscribe("/odom", 1, &MPCNode::odomPathCB, this); // 1105 新增：历史轨迹记录的odom订阅
     
     _pub_odompath  = _nh.advertise<nav_msgs::Path>("/mpc_reference", 1); // reference path for MPC ///mpc_reference 
     _pub_mpctraj   = _nh.advertise<nav_msgs::Path>("/mpc_trajectory", 1);// MPC trajectory output
+    _pub_cte_error = _nh.advertise<std_msgs::Float32>("/cte_error", 1); //1112 新增：初始化横向误差发布者
     //_pub_ackermann = _nh.advertise<ackermann_msgs::AckermannDriveStamped>("/ackermann_cmd", 1);
     if(_pub_twist_flag)
         _pub_twist = _nh.advertise<geometry_msgs::Twist>("/cmd_vel", 1); //for stage (Ackermann msg non-supported)
@@ -179,7 +219,8 @@ MPCNode::MPCNode()
     _pub_totalcost  = _nh.advertise<std_msgs::Float32>("/total_cost", 1); // Global path generated from another source
     _pub_ctecost  = _nh.advertise<std_msgs::Float32>("/cross_track_error", 1); // Global path generated from another source
     _pub_ethetacost  = _nh.advertise<std_msgs::Float32>("/theta_error", 1); // Global path generated from another source
-    
+    _pub_odom_path_history = _nh.advertise<nav_msgs::Path>("/recorded_path", 10); // 1105 新增：历史轨迹发布
+
     //Timer
     _timer1 = _nh.createTimer(ros::Duration((1.0)/_controller_freq), &MPCNode::controlLoopCB, this); // 10Hz //*****mpc
 
@@ -190,6 +231,7 @@ MPCNode::MPCNode()
     _throttle = 0.0; 
     _w = 0.0;
     _speed = 0.0;
+    _wheel_odom = nav_msgs::Odometry();
 
     //_ackermann_msg = ackermann_msgs::AckermannDriveStamped();
     _twist_msg = geometry_msgs::Twist();
@@ -210,16 +252,23 @@ MPCNode::MPCNode()
     _mpc_params["W_DANGVEL"] = _w_angvel_d;
     _mpc_params["W_DA"]     = _w_accel_d;
     _mpc_params["W_CTE_INT"] = _w_cte_int;  //1026
+
     _mpc_params["ANGVEL"]   = _max_angvel;
     _mpc_params["MAXTHR"]   = _max_throttle;
     _mpc_params["BOUND"]    = _bound_value;
     _mpc.LoadParams(_mpc_params);
+
+    _odom_count = 0;
+    _odom_path_history = nav_msgs::Path();
+    _odom_path_history.header.frame_id = _planning_frame;
 
     min_idx = 0;
     idx = 0;
     _mpc_etheta = 0;
     _mpc_cte = 0;
     _cte_int = 0.0;  //1026
+    _prev_cte = 0.0; 
+
     cout<< "ros::Time::now().toSec()  "<<ros::Time::now().toNSec() << endl;
 }
 
@@ -228,6 +277,68 @@ MPCNode::~MPCNode()
     file.close();
     
 };
+
+
+void MPCNode::odomPathCB(const nav_msgs::Odometry::ConstPtr& odomMsg)
+{
+    _odom_count += 1;
+    if (_odom_count % 3 != 0) {
+        return;
+    }
+
+    try {
+        // 使用转换后的 _odom 数据
+        geometry_msgs::PoseStamped base_pose;
+        base_pose.header = _odom.header;
+        base_pose.pose = _odom.pose.pose;
+
+        // 如果需要转换到其他坐标系，可以在这里进行
+        // 否则直接使用 base_link 在 map 下的坐标
+        _odom_path_history.header.stamp = ros::Time::now();
+        _odom_path_history.header.frame_id = _planning_frame; // 使用 map 坐标系
+        _odom_path_history.poses.push_back(base_pose);
+        
+        _pub_odom_path_history.publish(_odom_path_history);
+
+        if(_gen_path.poses.size() > 0) // 确保有全局路径
+        {
+            double min_cte = std::numeric_limits<double>::max();
+            const double px = base_pose.pose.position.x;
+            const double py = base_pose.pose.position.y;
+            
+            // 遍历全局路径点，找到最小距离作为横向误差
+            for(int i = 0; i < _gen_path.poses.size(); i++) 
+            {
+                geometry_msgs::PoseStamped path_pose;
+                // 转换到同一坐标系
+                _tf_listener.transformPose(_planning_frame, ros::Time(0), 
+                                         _gen_path.poses[i], _gen_path.header.frame_id, path_pose);
+                
+                double dx = path_pose.pose.position.x - px;
+                double dy = path_pose.pose.position.y - py;
+                double current_dist = sqrt(dx*dx + dy*dy);
+                
+                if(current_dist < min_cte)
+                {
+                    min_cte = current_dist;
+                }
+            }
+            
+            // 发布横向误差
+            _cte_error_msg.data = static_cast<float>(min_cte);
+            _pub_cte_error.publish(_cte_error_msg);
+        }
+
+    } catch (tf::TransformException &ex) {
+        ROS_WARN("Failed to process path history: %s", ex.what());
+        return;
+    }
+}
+
+void MPCNode::wheelOdomCB(const nav_msgs::Odometry::ConstPtr& wheelOdomMsg)
+{
+    _wheel_odom = *wheelOdomMsg;
+}
 
 // Public: return _thread_numbers
 int MPCNode::get_thread_numbers()
@@ -271,12 +382,47 @@ Eigen::VectorXd MPCNode::polyfit(Eigen::VectorXd xvals, Eigen::VectorXd yvals, i
     return result;
 }
 
-// CallBack: Update odometry
 void MPCNode::odomCB(const nav_msgs::Odometry::ConstPtr& odomMsg)
 {
+    /// ----------------------  室内定位下的坐标系补偿/微调 -------------------  ///
+    // // 直接应用静态变换计算
+    // nav_msgs::Odometry transformed_odom = *odomMsg;
+    
+    // // 获取当前位姿的方向
+    // tf::Pose pose;
+    // tf::poseMsgToTF(odomMsg->pose.pose, pose);
+    // double yaw = tf::getYaw(pose.getRotation())+0/180*M_PI;       //TODO1112
+    
+    // // 1106：laser2base坐标变换
+    // transformed_odom.pose.pose.position.x -= _laser2base * cos(yaw);
+    // transformed_odom.pose.pose.position.y -= _laser2base * sin(yaw);
+
+    // transformed_odom.child_frame_id = _car_frame;
+    
+    // _odom = transformed_odom;
+    /// ----------------------  室内定位下的坐标系补偿/微调 -------------------  ///
+
+
     _odom = *odomMsg;
-    // goalReachedJudge();      // 暂时把接受目标点的功能关闭
+
+    // /// ----------------------  室外gps定位下的坐标系补偿/微调 -------------------  ///
+    // // 12.17 修改：在接收 odom 数据时直接补偿角度偏差
+    // // 获取原始的 Yaw 角
+    // double raw_yaw = tf::getYaw(odomMsg->pose.pose.orientation);
+    
+    // // 计算修正后的 Yaw (Raw - Offset)。
+    // // 原理：如果 baselink 物理上偏左(正值)，odom读数会偏大，我们需要减去偏差值让它回归0(正前方)
+    // double corrected_yaw = raw_yaw - (_heading_offset_deg * M_PI / 180.0);
+
+    // // 将修正后的数据存入 _odom
+    // _odom = *odomMsg;
+    // // 重写 orientation 四元数
+    // _odom.pose.pose.orientation = tf::createQuaternionMsgFromYaw(corrected_yaw);
+    //     /// ----------------------  室外gps定位下的坐标系补偿/微调 -------------------  ///
+
 }
+
+
 
 // CallBack: Update generated path (conversion to odom frame)
 void MPCNode::desiredPathCB(const nav_msgs::Path::ConstPtr& totalPathMsg)
@@ -306,7 +452,7 @@ void MPCNode::desiredPathCB(const nav_msgs::Path::ConstPtr& totalPathMsg)
         int min_idx_in_direction = -1; 
         
         // 从里程计获取车辆的线速度和角速度信息
-        const double linear_velocity = odom.twist.twist.linear.x;
+        const double linear_velocity = _wheel_odom.twist.twist.linear.x;
         tf::Pose pose;
         tf::poseMsgToTF(odom.pose.pose, pose);
         const double theta = tf::getYaw(pose.getRotation());
@@ -341,7 +487,7 @@ void MPCNode::desiredPathCB(const nav_msgs::Path::ConstPtr& totalPathMsg)
         for(int i = 0; i < N; i++) 
         {
             geometry_msgs::PoseStamped pose_in_odom;       // 1015 先把路径转换到odom坐标系下
-            _tf_listener.transformPose(_odom_frame, ros::Time(0), 
+            _tf_listener.transformPose(_planning_frame, ros::Time(0), 
                                      totalPathMsg->poses[i], totalPathMsg->header.frame_id, pose_in_odom);
             dx = pose_in_odom.pose.position.x - px;
             dy = pose_in_odom.pose.position.y - py;
@@ -394,7 +540,7 @@ void MPCNode::desiredPathCB(const nav_msgs::Path::ConstPtr& totalPathMsg)
             // 位姿坐标转换
             // _tf_listener.transformPose(_map_frame, ros::Time(0) , 
             //                                 totalPathMsg->poses[i], _odom_frame, tempPose); 
-            _tf_listener.transformPose(_odom_frame, ros::Time(0), 
+            _tf_listener.transformPose(_planning_frame, ros::Time(0), 
                          totalPathMsg->poses[i], totalPathMsg->header.frame_id, tempPose);      // 1015
             // tempPose.pose.position.z=0;                    
             mpc_path.poses.push_back(tempPose);
@@ -410,7 +556,7 @@ void MPCNode::desiredPathCB(const nav_msgs::Path::ConstPtr& totalPathMsg)
             _odom_path = mpc_path; // Path waypoints in odom frame
             _path_computed = true;
             // publish odom path
-            mpc_path.header.frame_id = _odom_frame;     // 1015
+            mpc_path.header.frame_id = _planning_frame;     // 1015
             mpc_path.header.stamp = ros::Time::now();
             _pub_odompath.publish(mpc_path);
         }
@@ -545,9 +691,9 @@ void MPCNode::controlLoopCB(const ros::TimerEvent&)
         }
 
 
-        const double vx = odom.twist.twist.linear.x; //twist: body fixed frame
-        const double vy = odom.twist.twist.linear.y; //twist: body fixed frame
-        const double v = sqrt(vx*vx+vy*vy);
+        const double vx = _wheel_odom.twist.twist.linear.x; // 使用轮式里程计的线速度x
+        const double vy = _wheel_odom.twist.twist.linear.y; // 使用轮式里程计的线速度y
+        const double v = sqrt(vx*vx+vy*vy); // 计算合速度
         // const double v = odom.twist.twist.linear.x;
 
         // Update system inputs: U=[w, throttle]  系统输入 方向，油门
@@ -576,13 +722,81 @@ void MPCNode::controlLoopCB(const ros::TimerEvent&)
         // Fit waypoints 拟合3阶多项式  依次从低次到高次 y = ax^3 + bx^2 + cx + d coeffs[0]为常数项
         auto coeffs = polyfit(x_veh, y_veh, 5); 
         // 计算给定多项式系数在特定x值处的多项式的值
-        const double cte  = polyeval(coeffs, 0.0); // 横向误差 车辆当前位置与拟合路径在y轴方向上的偏差,coeffs[0]
+        const double cte  = polyeval(coeffs, 0.0); // 横向误差 车辆当前位置与拟合路径在y轴方向上的偏差
         const double etheta = atan(coeffs[1]); // 车辆坐标系下拟合曲线的第一个点的切线夹角
 
         _mpc_cte = cte;
         _mpc_etheta = etheta;
-        cout<< "_mpc_etheta" << _mpc_etheta <<endl;
-        _cte_int += cte * dt;   //1026:累积积分误差
+
+        // _cte_int += cte * dt;   //1026:old: 累积积分误差
+        
+        ///// ----------------- 积分误差项：抗积分饱和 ----------------- /////
+        // 4. 第四级防护：过零清零 (Zero Crossing Reset)
+        // 原理：当CTE符号改变时（跨过参考线），之前的积分力已经完成任务，应立即清除以防超调
+        if (cte * _prev_cte < 0.0) 
+        {
+            _cte_int = 0.0; 
+        }
+        _prev_cte = cte; 
+        
+        // 1. 速度门限 & 模式门限：只有在行驶(速度>阈值)且有目标且未到达时才积分
+        if (abs(v) > _integ_v_thresh && _goal_received && !_goal_reached) 
+        {
+            // 2. 衰减积分 (Leaky Integrator)：引入衰减系数，让旧误差随时间衰减，解决震荡
+            _cte_int = _cte_int * _integ_decay + cte * dt;
+        }
+        else
+        {
+            // 停车或无目标时清零，解决静止积分爆炸问题
+            _cte_int = 0.0;
+        }
+
+        // 3. 硬限幅 (Hard Clamping)：防止数值过大
+        if (_cte_int > _integ_max) _cte_int = _integ_max;
+        else if (_cte_int < -_integ_max) _cte_int = -_integ_max;
+        ///// ----------------- 积分误差项：抗积分饱和 ----------------- /////
+
+        ///// ----------------- 根据曲率和当前误差值自适应计算参考速度 ----------------- /////
+        // 目的：误差大或弯道急时主动减速，解决“死不减速”导致的超调
+        
+        // A. 基于误差减速
+        // 公式：v = v_max / (1 + k1*|cte| + k2*|etheta|)
+        double error_scaling = 1.0 / (1.0 + _v_ref_cte_k * abs(cte) + _v_ref_etheta_k * abs(etheta));
+        double v_ref_error = _ref_vel * error_scaling; 
+
+        // B. 基于曲率减速 
+        // 计算当前点的曲率 k = |y''| / (1 + y'^2)^(1.5)
+        // 对于多项式 y = c0 + c1*x + c2*x^2... 在车体坐标系原点(x=0):
+        double dy = coeffs[1];        // y' = c1
+        double ddy = 2 * coeffs[2];   // y'' = 2*c2
+        double curvature = abs(ddy) / pow(1 + dy*dy, 1.5);
+        
+        // 物理公式 v < sqrt(a_lat / k)
+        // 这里硬编码侧向加速度限制为 1.5 m/s^2，省略yaml参数以简化调参
+        double lat_acc_limit_internal = 1.5; 
+        double v_ref_curve = _ref_vel; // 默认不限速
+        if (curvature > 0.001) { // 防止除以0
+            v_ref_curve = sqrt(lat_acc_limit_internal / curvature);
+        }
+
+        // C. 融合与限幅
+        // 取两者中的较小值（安全第一），且不低于最小速度，不高于设定最高速度
+        double final_ref_vel = std::min(v_ref_error, v_ref_curve);
+        final_ref_vel = std::max(final_ref_vel, _min_ref_vel); // 防止停车
+        final_ref_vel = std::min(final_ref_vel, _ref_vel);     // 不超速
+
+        cout << "[Adaptive Vel] Final: " << final_ref_vel 
+                 << " | Limiter: " << (v_ref_error < v_ref_curve ? "ERROR (误差)" : "CURVATURE (弯道)") 
+                 << " | v_err: " << v_ref_error 
+                 << " | v_curv: " << v_ref_curve << endl;   // 调试用：看到底是哪项限制了参考速度
+
+        // D. 关键步骤：将动态速度传递给 MPC 求解器
+        // 这一步修改了 _mpc_params 中的参数，并重新加载，改变了 Solver 内部的成本函数目标
+        _mpc_params["REF_V"] = final_ref_vel;
+        _mpc.LoadParams(_mpc_params);
+
+        ///// ----------------- 根据曲率和当前误差值自适应计算参考速度 ----------------- /////
+
 
         VectorXd state(7);  //1026:扩展状态向量
         if(_delay_mode)
@@ -597,7 +811,8 @@ void MPCNode::controlLoopCB(const ros::TimerEvent&)
             const double cte_act = cte + v * sin(etheta) * dt; // 车辆坐标系下的y向误差
             const double etheta_act = etheta - theta_act;  
             const double cte_int_act = _cte_int + cte * dt; //1026:预测积分项在延迟后的状态
-            state << px_act, py_act, theta_act, v_act, cte_act, etheta_act, cte_int_act;   // 1026:7自由度状态变量 车辆坐标系下 x、y、 角度、速度、横向误差、方向误差（前进方向与期望轨迹切线方向夹角） 
+
+            state << px_act, py_act, theta_act, v_act, cte_act, etheta_act, cte_int_act;   // 1026:7自由度状态变量
         }
         else
         {
@@ -653,6 +868,7 @@ void MPCNode::controlLoopCB(const ros::TimerEvent&)
         _speed = 0.0;
         _w = 0;
         _cte_int = 0.0; //1026:当没有目标或到达目标时，清除积分项
+
         if(_goal_reached && _goal_received)
             cout << "Goal Reached: control loop !" << endl;
     }

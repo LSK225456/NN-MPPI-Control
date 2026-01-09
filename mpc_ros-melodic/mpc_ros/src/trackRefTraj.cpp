@@ -37,8 +37,9 @@ class FG_eval
         double _dt, _ref_cte, _ref_etheta, _ref_vel; 
         double  _w_cte, _w_etheta, _w_vel, _w_angvel, _w_accel, _w_angvel_d, _w_accel_d;
         double _w_cte_int;  //1026:积分项添加新权重
-        int _mpc_steps, _x_start, _y_start, _theta_start, _v_start, _cte_start, _etheta_start, _angvel_start, _a_start;
         int _cte_int_start;     //1026
+        int _mpc_steps, _x_start, _y_start, _theta_start, _v_start, _cte_start, _etheta_start, _angvel_start, _a_start;
+
         AD<double> cost_cte, cost_etheta, cost_vel;
         // Constructor
         FG_eval(Eigen::VectorXd coeffs) 
@@ -57,7 +58,6 @@ class FG_eval
             _w_accel   = 50;
             _w_angvel_d = 0;
             _w_accel_d = 0;
-            _w_cte_int = 500;      //1026:todo后续放到yaml里改
 
             _mpc_steps   = 40;
             _x_start     = 0;
@@ -88,7 +88,8 @@ class FG_eval
             _w_accel = params.find("W_A") != params.end()     ? params.at("W_A") : _w_accel;
             _w_angvel_d = params.find("W_DANGVEL") != params.end() ? params.at("W_DANGVEL") : _w_angvel_d;
             _w_accel_d = params.find("W_DA") != params.end()     ? params.at("W_DA") : _w_accel_d;
-            _w_cte_int = params.find("W_CTE_INT") != params.end() ? params.at("W_CTE_INT") : _w_cte_int;        //1026
+            _w_cte_int = params.find("W_CTE_INT") != params.end() ? params.at("W_CTE_INT") : _w_cte_int;    //1026
+
 
             _x_start     = 0;
             _y_start     = _x_start + _mpc_steps;
@@ -108,7 +109,7 @@ class FG_eval
         typedef CPPAD_TESTVECTOR(AD<double>) ADvector; 
         // 代价函数和约束条件计算
         // fg: function that evaluates the objective and constraints using the syntax       
-        void operator()(ADvector& fg, const ADvector& vars)     //fg:成本和所有约束
+        void operator()(ADvector& fg, const ADvector& vars) 
         {
             // fg[0] for cost function
             fg[0] = 0;
@@ -128,7 +129,7 @@ class FG_eval
                 cout << "_etheta_start" << vars[_etheta_start + i] <<endl;
             }*/
 
-            for (int i = 0; i < _mpc_steps; i++)    // 状态成本：横向、航向误差，参考速度，横向误差积分项
+            for (int i = 0; i < _mpc_steps; i++) 
             {
               fg[0] += _w_cte * CppAD::pow(vars[_cte_start + i] - _ref_cte, 2); // cross deviation error
               fg[0] += _w_etheta * CppAD::pow(vars[_etheta_start + i] - _ref_etheta, 2); // heading error
@@ -144,14 +145,14 @@ class FG_eval
             
 
             // Minimize the use of actuators.
-            for (int i = 0; i < _mpc_steps - 1; i++) {  // 这个循环只到 _mpc_steps - 1，因为 N 个状态之间只有 N-1 次控制
+            for (int i = 0; i < _mpc_steps - 1; i++) {
               fg[0] += _w_angvel * CppAD::pow(vars[_angvel_start + i], 2);
               fg[0] += _w_accel * CppAD::pow(vars[_a_start + i], 2);
-            }   // 惩罚过大的转向（_w_angvel）和过大的加减速（_w_accel）
+            }
             // cout << "cost of actuators: " << fg[0] << endl; 
 
             // Minimize the value gap between sequential actuations.
-            for (int i = 0; i < _mpc_steps - 2; i++) {  // 惩罚“急打方向”（_w_angvel_d）和“急加减速”（_w_accel_d）
+            for (int i = 0; i < _mpc_steps - 2; i++) {
               fg[0] += _w_angvel_d * CppAD::pow(vars[_angvel_start + i + 1] - vars[_angvel_start + i], 2);
               fg[0] += _w_accel_d * CppAD::pow(vars[_a_start + i + 1] - vars[_a_start + i], 2);
             }

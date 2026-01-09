@@ -17,13 +17,19 @@
         <param name="sampling_step"   type="double" value="0.002" />   
         <param name="max_adjust_iter" type="int"    value="100" />    
         <param name="adjust_factor"   type="double" value="0.9" />    
+        <param name="planning_frame"    value="world" />        
+        <param name="car_frame"         value="base_link_calib" />  
+        <param name="topic_odom"        value="/odom_ekf_lsk" />              <!-- 开启扩展ekf/odom_ekf_lsk       不开启/odom_calib -->
+        <param name="topic_global_path" value="/desired_path" /> 
+        <param name="heading_offset_deg" type="double" value="0.0" />
+        <!-- baselink和实际车头朝向的角度差 -->
     </node>
 
      <!-- <node name="MPC_tracking" pkg="mpc_ros" type="tracking_reference_trajectory_plan" output="screen" if="$(eval controller == 'mpc')">
          <rosparam file="$(find mpc_ros)/params/mpc_test_scout.yaml" command="load" />
      </node> -->
 
-     <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mpc_ros)/rviz/rviz_navigation.rviz"/>
+     <!-- <node name="rviz" pkg="rviz" type="rviz" args="-d $(find mpc_ros)/rviz/rviz_navigation.rviz"/> -->
 
 </launch>
 

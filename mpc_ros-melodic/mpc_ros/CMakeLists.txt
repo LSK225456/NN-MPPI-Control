@@ -82,3 +82,45 @@ if(BUILD_EXAMPLE)
     ADD_EXECUTABLE( CppAD_Ipopt example/CppAD_Ipopt.cpp )
     TARGET_LINK_LIBRARIES(CppAD_Ipopt ipopt)
 endif(BUILD_EXAMPLE)
+
+
+# =========================================================
+# INSTALL RULES (必须添加以下内容，RK3588才能找到文件)
+# =========================================================
+
+# 1. 安装编译好的 C++ 可执行文件和库
+install(TARGETS 
+    MPC_Node 
+    tracking_reference_trajectory 
+    tracking_reference_trajectory_plan 
+    Pure_Pursuit
+    global_planner_lib
+  ARCHIVE DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
+  RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+# 2. 安装 launch 文件、参数、地图、rviz配置等文件夹
+# 注意：务必检查你的文件夹名称是否匹配 (launch, params, maps, rviz, cfg)
+install(DIRECTORY launch params maps rviz cfg
+  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+# 3. 安装头文件 (如果有)
+install(DIRECTORY include/${PROJECT_NAME}/
+  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+)
+
+# 4. 安装 Python 脚本 (使它们可以通过 rosrun/roslaunch 调用)
+# 这里列出了你之前文件列表中出现的关键脚本，请根据实际情况增减
+catkin_install_python(PROGRAMS
+  script/mpc_trajectory_generation.py
+  script/dwa_trajectory_generation.py
+  script/base_control.py
+  script/odom_path_plotter.py
+  script/teleop_keyboard.py
+  script/car_calib.py
+  script/odom_calib.py
+  script/evaluate_tracking.py
+  DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)

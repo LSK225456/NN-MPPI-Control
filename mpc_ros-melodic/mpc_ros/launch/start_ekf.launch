@@ -1,0 +1,6 @@
+<launch>
+    <node pkg="robot_localization" type="ekf_localization_node" name="ekf_filter_node" output="screen">
+        <rosparam command="load" file="$(find mpc_ros)/params/ekf_smoothing.yaml" />
+        <remap from="odometry/filtered" to="/odom_ekf_lsk"/>
+    </node>
+</launch>
