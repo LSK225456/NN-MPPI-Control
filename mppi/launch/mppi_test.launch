@@ -1,32 +1,9 @@
 <launch>
+    <!-- 加载 YAML 参数文件 -->
+    <rosparam command="load" file="$(find mppi)/config/mppi_params.yaml" />
+
     <node pkg="mppi" type="mppi_ros_test.py" name="mppi_controller" output="screen">
-
-        <param name="is_odom_transform" value="true"/>
-        <param name="laser2base_dist" value="0.38"/>
-        <param name="laser2base_angle" value="0.0593"/> 
-        
-        <param name="topic_pose" value="/odom"/>
-        <param name="topic_twist" value="/wheel_odom"/>
-        <param name="topic_cmd" value="/cmd_vel"/>
-        <param name="topic_path" value="/global_plan16"/>
-
-        <param name="lookahead_dist" value="5.0"/>
-        <param name="goal_tolerance" value="0.2"/>
-
-        <param name="horizon" value="30"/>
-        <param name="num_samples" value="500"/>
-        <param name="lambda" value="1.0"/>
-        <param name="control_freq" value="20.0"/>
-        
-        <rosparam param="noise_sigma">[0.5, 0.6]</rosparam>
-
-        <param name="w_dist" value="20.0"/>
-        <param name="w_vel" value="0.1"/>
-
-        <param name="w_cte" value="100.0"/>  <param name="w_yaw" value="5.0"/>   <param name="w_vel" value="0.5"/>
-        
     </node>
 
     <node pkg="rviz" type="rviz" name="rviz_mppi" args="-d $(find mppi)/rviz/mppi.rviz" />
-
 </launch>

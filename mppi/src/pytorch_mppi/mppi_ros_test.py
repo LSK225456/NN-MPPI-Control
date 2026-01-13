@@ -31,41 +31,42 @@ class MPPIControllerNode:
         # 初始化节点
         rospy.init_node('mppi_controller_node', anonymous=True)
 
-        # --- 参数配置 (从 Parameter Server 获取，支持 Launch 文件修改) ---
+        # --- 参数配置 (从 Parameter Server 获取 YAML 配置) ---
         
         # 话题名称配置
-        self.topic_pose = rospy.get_param("~topic_pose", "/odom")           # 机器人的定位话题
-        self.topic_twist = rospy.get_param("~topic_twist", "/wheel_odom")   # 机器人的速度话题
-        self.topic_cmd = rospy.get_param("~topic_cmd", "/cmd_vel")          # 输出控制指令话题
-        self.topic_path = rospy.get_param("~topic_path", "/global_plan16")      # 全局路径话题
+        self.topic_pose = rospy.get_param("~topics/pose", "/odom_calib")
+        self.topic_twist = rospy.get_param("~topics/twist", "/wheel_odom")
+        self.topic_cmd = rospy.get_param("~topics/cmd", "/cmd_vel")
+        self.topic_path = rospy.get_param("~topics/path", "/global_plan16")
 
         # 坐标变换参数配置
-        self.is_odom_transform = rospy.get_param("~is_odom_transform", False)        # 是否把odom坐标转换
-        self.laser2base_dist = rospy.get_param("~laser2base_dist", 0.38)      # 激光雷达相对于底盘的距离 (米)
-        self.laser2base_angle = rospy.get_param("~laser2base_angle", 3.4 / 180.0 * math.pi)
+        self.is_odom_transform = rospy.get_param("~transform/is_odom_transform", False)
+        self.laser2base_dist = rospy.get_param("~transform/laser2base_dist", 0.38)
+        self.laser2base_angle = rospy.get_param("~transform/laser2base_angle", 0.0593)
         
         # MPPI 算法超参数
-        self.horizon = rospy.get_param("~horizon", 30)              # 预测步长 T (例如往后预测30步)
-        self.num_samples = rospy.get_param("~num_samples", 500)     # 采样轨迹数量 K
-        self.lambda_val = rospy.get_param("~lambda", 0.05)          # 温度系数 (越小越倾向于利用现有最优，越大越随机)
-        self.noise_sigma = rospy.get_param("~noise_sigma", [0.5, 0.6]) # 控制噪声标准差 [v_std, w_std]
-        self.control_freq = rospy.get_param("~control_freq", 20.0)  # 控制频率 Hz
+        self.horizon = rospy.get_param("~mppi/horizon", 30)
+        self.num_samples = rospy.get_param("~mppi/num_samples", 500)
+        self.lambda_val = rospy.get_param("~mppi/lambda", 1.0)
+        self.noise_sigma = rospy.get_param("~mppi/noise_sigma", [0.5, 0.6])
+        self.control_freq = rospy.get_param("~mppi/control_freq", 20.0)
         
         # 路径跟踪参数
-        self.lookahead_dist = rospy.get_param("~lookahead_dist", 1.0) # 前视距离 (米)，在路径上找多远的目标
-        self.goal_tolerance = rospy.get_param("~goal_tolerance", 0.2) # 到达终点的判定距离
-        self.ref_path_length = rospy.get_param("~ref_path_length", 5.0) # 参考路径长度：米
-        self.w_cte = rospy.get_param("~w_cte", 100.0)   # 横向误差权重
-        self.w_yaw = rospy.get_param("~w_yaw", 10.0)    # 航向误差权重
-        self.w_vel = rospy.get_param("~w_vel", 0.5)     # 参考速度
+        self.lookahead_dist = rospy.get_param("~path_tracking/lookahead_dist", 5.0)
+        self.goal_tolerance = rospy.get_param("~path_tracking/goal_tolerance", 0.2)
+        self.ref_path_length = rospy.get_param("~path_tracking/ref_path_length", 5.0)
         
-        # 3. 目标状态参数
-        # 期望的巡航线速度 (m/s)
-        self.target_velocity = rospy.get_param("~target_velocity", 0.5)
-
         # 代价权重
-        self.w_dist = rospy.get_param("~w_dist", 10.0)  # 距离代价权重
-        self.w_vel = rospy.get_param("~w_vel", 0.1)     # 速度平滑/激励权重
+        self.w_cte = rospy.get_param("~cost_weights/w_cte", 100.0)
+        self.w_yaw = rospy.get_param("~cost_weights/w_yaw", 5.0)
+        self.w_vel = rospy.get_param("~cost_weights/w_vel", 0.5)
+        self.target_velocity = rospy.get_param("~cost_weights/target_velocity", 0.5)
+        
+        # 控制量限制
+        v_min = rospy.get_param("~control_limits/v_min", -0.4)
+        v_max = rospy.get_param("~control_limits/v_max", 0.5)
+        w_min = rospy.get_param("~control_limits/w_min", -0.4)
+        w_max = rospy.get_param("~control_limits/w_max", 0.4)
 
         # 设备选择 (GPU/CPU)
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -86,9 +87,9 @@ class MPPIControllerNode:
             device=self.device, dtype=torch.float32
         )
         
-        # 2. 设置控制量边界 (v_min, v_max, w_min, w_max)
-        u_min = torch.tensor([-0.4, -0.4], device=self.device)  # 线速度，角速度下限
-        u_max = torch.tensor([0.5, 0.4], device=self.device)
+        # 2. 设置控制量边界
+        u_min = torch.tensor([v_min, w_min], device=self.device)  # 线速度，角速度下限
+        u_max = torch.tensor([v_max, w_max], device=self.device)
 
         # 3. 实例化 MPPI 类
         self.mppi = MPPI(
@@ -159,9 +160,6 @@ class MPPIControllerNode:
     def trajectory_cost_function(self, state, action):
         """
         并行轨迹代价函数
-        特点：
-        1. 无倒车惩罚：MPPI 可自由探索负速度区域。
-        2. 强 CTE 约束：只要偏离路径，代价指数级上升。
         """
         # --- 1. 边界条件：异常保护 ---
         if not hasattr(self, 'ref_path_tensor') or self.ref_path_tensor is None:
@@ -191,10 +189,10 @@ class MPPIControllerNode:
         yaw_error = state[:, 2] - ref_yaws
         yaw_error = torch.atan2(torch.sin(yaw_error), torch.cos(yaw_error))
         
-        # --- 4. 权重配置 (严格遵循您的优先级) ---
-        W_CTE = 100.0       # [最高优先级] 必须死死咬住路径
-        W_YAW = 10.0        # [次高优先级] 车头尽量正
-        W_VEL = 0.5         # [低优先级] 仅作为驱动力，允许被 CTE 牺牲
+        # --- 4. 权重配置 (从 YAML 读取) ---
+        W_CTE = self.w_cte
+        W_YAW = self.w_yaw
+        W_VEL = self.w_vel
         
         # --- 5. 计算各项 Cost ---
         
@@ -205,12 +203,8 @@ class MPPIControllerNode:
         cost_yaw = self.w_yaw * (yaw_error**2)
         
         # [Cost 3] 速度驱动
-        # 这里的逻辑是：我们给一个期望速度(如 0.5)，
-        # 但因为 W_VEL 很小 (0.5) 而 W_CTE 很大 (100.0)，
-        # 如果倒车 (v < 0) 能让 min_dists_sq 变小，算法会果断选择倒车，
-        # 因为节省的 CTE 代价远大于速度偏差带来的惩罚。
-        target_v = 0.5
-        cost_vel = self.w_vel * ((action[:, 0] - target_v)**2)
+        target_v = self.target_velocity
+        cost_vel = W_VEL * ((action[:, 0] - target_v)**2)
         
         # --- 6. 总代价 ---
         # 不再包含任何 crash/倒车 惩罚项
