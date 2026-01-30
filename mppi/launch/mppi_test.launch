@@ -1,9 +1,0 @@
-<launch>
-    <!-- 加载 YAML 参数文件 -->
-    <rosparam command="load" file="$(find mppi)/config/mppi_params.yaml" />
-
-    <node pkg="mppi" type="mppi_ros_test.py" name="mppi_controller" output="screen">
-    </node>
-
-    <node pkg="rviz" type="rviz" name="rviz_mppi" args="-d $(find mppi)/rviz/mppi.rviz" />
-</launch>

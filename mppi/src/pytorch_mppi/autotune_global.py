@@ -127,7 +127,7 @@ class RayOptimizer(autotune.Optimizer):
 
         hyperopt_search = self.search_alg(points_to_evaluate=[init], metric="cost", mode="min")
 
-        trainable_with_resources = tune.with_resources(self.trainable, {"gpu": 1 if torch.cuda.is_available() else 0})
+        trainable_with_resources = tune.with_resources(self.trainable, {"gpu": 1 if 0 else 0})
         self.optim = tune.Tuner(
             trainable_with_resources,
             tune_config=tune.TuneConfig(

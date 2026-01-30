@@ -1,0 +1,38 @@
+<launch>
+    <!-- ============================================ -->
+    <!-- MPPI 测试环境 (模拟器 + RViz)                 -->
+    <!-- ============================================ -->
+    
+    <!-- 参数 -->
+    <arg name="path_type" default="bezier" doc="路径类型: straight, circle, sine, bezier" />
+    <arg name="rviz" default="true" doc="是否启动 RViz" />
+    
+    <!-- 贝塞尔曲线参数（仅当 path_type=bezier 时有效） -->
+    <arg name="bezier_start_x" default="0.0" />
+    <arg name="bezier_start_y" default="0.0" />
+    <arg name="bezier_end_x" default="12.0" doc="贝塞尔曲线终点 X 坐标" />
+    <arg name="bezier_end_y" default="8.0" doc="贝塞尔曲线终点 Y 坐标" />
+    <arg name="bezier_control_ratio" default="0.6" doc="控制点距离系数" />
+    <arg name="bezier_sampling_step" default="0.01" />
+    
+    <!-- 加载 MPPI 参数 (供控制器使用) -->
+    <rosparam file="$(find mppi)/config/mppi_params.yaml" command="load" />
+    
+    <!-- 模拟器节点 -->
+    <node pkg="mppi" type="test_lsk_nn_mppi.py" name="simulator" output="screen">
+        <!-- 路径类型参数（关键修改：使用私有参数命名空间） -->
+        <param name="path" value="$(arg path_type)" />
+        
+        <!-- 贝塞尔曲线参数 -->
+        <param name="bezier_start_x" value="$(arg bezier_start_x)" />
+        <param name="bezier_start_y" value="$(arg bezier_start_y)" />
+        <param name="bezier_end_x" value="$(arg bezier_end_x)" />
+        <param name="bezier_end_y" value="$(arg bezier_end_y)" />
+        <param name="bezier_control_ratio" value="$(arg bezier_control_ratio)" />
+        <param name="bezier_sampling_step" value="$(arg bezier_sampling_step)" />
+    </node>
+    
+    <!-- RViz -->
+    <node if="$(arg rviz)" pkg="rviz" type="rviz" name="rviz" 
+          args="-d $(find mppi)/tests/test_mppi.rviz" output="screen" />
+</launch>

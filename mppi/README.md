@@ -1,313 +1,180 @@
-# PyTorch MPPI Implementation
-This repository implements Model Predictive Path Integral (MPPI) 
-with approximate dynamics in pytorch. MPPI typically requires actual
-trajectory samples, but [this paper](https://ieeexplore.ieee.org/document/7989202/)
-showed that it could be done with approximate dynamics (such as with a neural network)
-using importance sampling.
+# MPPI 模型预测路径积分控制器
 
-Thus it can be used in place of other trajectory optimization methods
-such as the Cross Entropy Method (CEM), or random shooting.
+基于 PyTorch 实现的 MPPI（Model Predictive Path Integral）控制器，用于移动机器人路径跟踪。支持运动学模型和神经网络动力学模型。
 
 ---
-New since Aug 2024 smoothing methods, including our own KMPPI, see the [section](#smoothing) below on smoothing
 
-# Installation
-```shell
-pip install pytorch-mppi
-```
-for autotuning hyperparameters, install with
-```shell
-pip install pytorch-mppi[tune]
-```
+## 📂 代码文件结构与功能说明
 
-for running tests, install with
-```shell
-pip install pytorch-mppi[test]
-```
-for development, clone the repository then install in editable mode
-```shell
-pip install -e .
-```
+### 🎯 核心功能模块
 
-# Usage
-See `tests/pendulum_approximate.py` for usage with a neural network approximating
-the pendulum dynamics. See the `not_batch` branch for an easier to read
-algorithm. Basic use case is shown below
+| 文件路径 | 功能说明 |
+|---------|---------|
+| **src/pytorch_mppi/mppi.py** | **MPPI 核心算法实现**，采样轨迹、计算代价、更新控制序列（算法主循环） |
+| **src/pytorch_mppi/mppi_ros_test.py** | **ROS 节点入口**，订阅定位/路径话题，调用 MPPI 算法，发布速度指令 |
+| **src/pytorch_mppi/dynamics_interface.py** | **动力学模型接口**，定义抽象基类，实现运动学模型，提供工厂函数创建不同后端 |
+| **src/pytorch_mppi/neural_mppi_dynamics.py** | **神经网络动力学封装**，包含 Keras 和 PyTorch 两种后端实现，管理历史缓冲区和粒子状态 |
+| **src/pytorch_mppi/mppi_viz.py** | **RViz 可视化工具**，发布候选轨迹、最优轨迹、参考路径等可视化话题 |
 
-```python
-from pytorch_mppi import MPPI
+---
 
-# create controller with chosen parameters
-ctrl = MPPI(dynamics, running_cost, nx, noise_sigma, num_samples=N_SAMPLES, horizon=TIMESTEPS,
-            lambda_=lambda_, device=d,
-            u_min=torch.tensor(ACTION_LOW, dtype=torch.double, device=d),
-            u_max=torch.tensor(ACTION_HIGH, dtype=torch.double, device=d))
+### 🔧 PyTorch GRU 模型定义（Phase 3 新增）
 
-# assuming you have a gym-like env
-obs = env.reset()
-for i in range(100):
-    action = ctrl.command(obs)
-    obs, reward, done, _ = env.step(action.cpu().numpy())
-```
+| 文件路径 | 功能说明 |
+|---------|---------|
+| **tests/pytorch_gru_model.py** | **PyTorch GRU 模型定义**，定义与 Keras 模型完全等价的网络结构，用于加载 `.pt` 权重 |
 
-# Requirements
-- pytorch (>= 1.0)
-- `next state <- dynamics(state, action)` function (doesn't have to be true dynamics)
-    - `state` is `K x nx`, `action` is `K x nu`
-- `cost <- running_cost(state, action)` function
-    - `cost` is `K x 1`, state is `K x nx`, `action` is `K x nu`
+---
 
-# Features
-- Approximate dynamics MPPI with importance sampling
-- Parallel/batch pytorch implementation for accelerated sampling
-- Control bounds via sampling control noise from rectified gaussian 
-- Handle stochastic dynamic models (assuming each call is a sample) by sampling multiple state trajectories for the same
-action trajectory with `rollout_samples`
-- 
-# Parameter tuning and hints
-`terminal_state_cost` - function(state (K x T x nx)) -> cost (K x 1) by default there is no terminal
-cost, but if you experience your trajectory getting close to but never quite reaching the goal, then
-having a terminal cost can help. The function should scale with the horizon (T) to keep up with the
-scaling of the running cost.
+### ⚙️ 配置文件
 
-`lambda_` - higher values increases the cost of control noise, so you end up with more
-samples around the mean; generally lower values work better (try `1e-2`)
+| 文件路径 | 功能说明 |
+|---------|---------|
+| **config/mppi_params.yaml** | **MPPI 参数配置**，包含粒子数、horizon、代价权重、动力学模型路径等所有可调参数 |
+| **launch/mppi_controller.launch** | **ROS 启动文件**，加载 YAML 配置并启动 MPPI 节点 |
 
-`num_samples` - number of trajectories to sample; generally the more the better.
-Runtime performance scales much better with `num_samples` than `horizon`, especially
-if you're using a GPU device (remember to pass that in!)
+---
 
-`noise_mu` - the default is 0 for all control dimensions, which may work out
-really poorly if you have control bounds and the allowed range is not 0-centered.
-Remember to change this to an appropriate value for non-symmetric control dimensions.
+### 🧪 性能诊断工具（Phase 3/4 新增）
 
-## Smoothing
-From version 0.8.0 onwards, you can use MPPI variants that smooth the control signal. We've implemented
-[SMPPI](https://arxiv.org/pdf/2112.09988) as well our own kernel interpolation MPPI (KMPPI). In the base algorithm,
-you can achieve somewhat smoother trajectories by increasing `lambda_`; however, that comes at the cost of
-optimality. Explicit smoothing algorithms can achieve smoothness without sacrificing optimality.
+| 文件路径 | 功能说明 |
+|---------|---------|
+| **tests/benchmark_dynamics.py** | **性能诊断工具**，测试纯模型推理、数据转换、step 函数各部分耗时，对比不同后端性能 |
 
-We used it and described it in our recent paper ([arxiv](https://arxiv.org/abs/2408.10450)) and you can cite it 
-until we release a work dedicated to KMPPI. Below we show the difference between MPPI, SMPPI, and KMPPI on a toy
-2D navigation problem where the control is a constrained delta position. You can check it out in `tests/smooth_mppi.py`.
+---
 
-The API is mostly the same, with some additional constructor options:
-```python
-import pytorch_mppi as mppi
-ctrl = mppi.KMPPI(args, 
-                 kernel=mppi.RBFKernel(sigma=2), # kernel in trajectory time space (1 dimensional)
-                 num_support_pts=5,              # number of control points to sample, <= horizon
-                 **kwargs)
-```
-The kernel can be any subclass of `mppi.TimeKernel`. It is a kernel in the trajectory time space (1 dimensional).
-Note that B-spline smoothing can be achieved by using a B-spline kernel. The number of support points is the number
-of control points to sample. Any trajectory points in between are interpolated using the kernel. For example if a
-trajectory horizon is 20 and `num_support_pts` is 5, then 5 control points evenly spaced throughout the horizon
-(with the first and last corresponding to the actual start and end of the trajectory) are sampled. The rest of the
-trajectory is interpolated using the kernel. The kernel is applied to the control signal, not the state signal.
+## 🚀 快速使用
 
-MPPI without smoothing
-
-![MPPI](https://imgur.com/9wEcT2s.gif) 
-
-[SMPPI](https://arxiv.org/pdf/2112.09988) smoothing by sampling noise in the action derivative space doesn't work well on this problem
-
-![SMPPI](https://imgur.com/xwYy3aj.gif)
-
-KMPPI smoothing with RBF kernel works well
-
-![KMPPI](https://imgur.com/IG1Zrtd.gif)
-
-
-## Autotune
-from version 0.5.0 onwards, you can automatically tune the hyperparameters.
-A convenient tuner compatible with the popular [ray tune](https://docs.ray.io/en/latest/tune/index.html) library
-is implemented. You can select from a variety of cutting edge black-box optimizers such as 
-[CMA-ES](https://github.com/CMA-ES/pycma), [HyperOpt](http://hyperopt.github.io/hyperopt/),
-[fmfn/BayesianOptimization](https://github.com/fmfn/BayesianOptimization), and so on.
-See `tests/auto_tune_parameters.py` for an example. A tutorial based on it follows.
-
-The tuner can be used for other controllers as well, but you will need to define the appropriate
-`TunableParameter` subclasses.
-
-First we create a toy 2D environment to do controls on and create the controller with some
-default parameters.
-```python
-import torch
-from pytorch_mppi import MPPI
-
-device = "cpu"
-dtype = torch.double
-
-# create toy environment to do on control on (default start and goal)
-env = Toy2DEnvironment(visualize=True, terminal_scale=10)
-
-# create MPPI with some initial parameters
-mppi = MPPI(env.dynamics, env.running_cost, 2,
-            terminal_state_cost=env.terminal_cost,
-            noise_sigma=torch.diag(torch.tensor([5., 5.], dtype=dtype, device=device)),
-            num_samples=500,
-            horizon=20, device=device,
-            u_max=torch.tensor([2., 2.], dtype=dtype, device=device),
-            lambda_=1)
+### 启动 MPPI 控制器（使用神经网络）
+```bash
+roslaunch mppi mppi_controller.launch use_neural:=true
 ```
 
-We then need to create an evaluation function for the tuner to tune on. 
-It should take no arguments and output a `EvaluationResult` populated at least by costs.
-If you don't need rollouts for the cost evaluation, then you can set it to None in the return.
-Tips for creating the evaluation function are described in comments below:
-
-```python
-from pytorch_mppi import autotune
-# use the same nominal trajectory to start with for all the evaluations for fairness
-nominal_trajectory = mppi.U.clone()
-# parameters for our sample evaluation function - lots of choices for the evaluation function
-evaluate_running_cost = True
-num_refinement_steps = 10
-num_trajectories = 5
-
-def evaluate():
-    costs = []
-    rollouts = []
-    # we sample multiple trajectories for the same start to goal problem, but in your case you should consider
-    # evaluating over a diverse dataset of trajectories
-    for j in range(num_trajectories):
-        mppi.U = nominal_trajectory.clone()
-        # the nominal trajectory at the start will be different if the horizon's changed
-        mppi.change_horizon(mppi.T)
-        # usually MPPI will have its nominal trajectory warm-started from the previous iteration
-        # for a fair test of tuning we will reset its nominal trajectory to the same random one each time
-        # we manually warm it by refining it for some steps
-        for k in range(num_refinement_steps):
-            mppi.command(env.start, shift_nominal_trajectory=False)
-
-        rollout = mppi.get_rollouts(env.start)
-
-        this_cost = 0
-        rollout = rollout[0]
-        # here we evaluate on the rollout MPPI cost of the resulting trajectories
-        # alternative costs for tuning the parameters are possible, such as just considering terminal cost
-        if evaluate_running_cost:
-            for t in range(len(rollout) - 1):
-                this_cost = this_cost + env.running_cost(rollout[t], mppi.U[t])
-        this_cost = this_cost + env.terminal_cost(rollout, mppi.U)
-
-        rollouts.append(rollout)
-        costs.append(this_cost)
-    # can return None for rollouts if they do not need to be calculated
-    return autotune.EvaluationResult(torch.stack(costs), torch.stack(rollouts))
+### 启动 MPPI 控制器（使用运动学模型）
+```bash
+roslaunch mppi mppi_controller.launch use_neural:=false
 ```
 
-With this we have enough to start tuning. For example, we can tune iteratively with the CMA-ES optimizer
-
-```python
-# these are subclass of TunableParameter (specifically MPPIParameter) that we want to tune
-params_to_tune = [autotune.SigmaParameter(mppi), autotune.HorizonParameter(mppi), autotune.LambdaParameter(mppi)]
-# create a tuner with a CMA-ES optimizer
-tuner = autotune.Autotune(params_to_tune, evaluate_fn=evaluate, optimizer=autotune.CMAESOpt(sigma=1.0))
-# tune parameters for a number of iterations
-iterations = 30
-for i in range(iterations):
-  # results of this optimization step are returned
-  res = tuner.optimize_step()
-  # we can render the rollouts in the environment
-  env.draw_rollouts(res.rollouts)
-# get best results and apply it to the controller
-# (by default the controller will take on the latest tuned parameter, which may not be best)
-res = tuner.get_best_result()
-tuner.apply_parameters(res.param_values)
-```
-This is a local search method that optimizes starting from the initially defined parameters.
-For global searching, we use ray tune compatible searching algorithms. Note that you can modify the
-search space of each parameter, but default reasonable ones are provided.
-
-```python
-# can also use a Ray Tune optimizer, see
-# https://docs.ray.io/en/latest/tune/api_docs/suggestion.html#search-algorithms-tune-search
-# rather than adapting the current parameters, these optimizers allow you to define a search space for each
-# and will search on that space
-from pytorch_mppi import autotune_global
-from ray.tune.search.hyperopt import HyperOptSearch
-from ray.tune.search.bayesopt import BayesOptSearch
-
-# the global version of the parameters define a reasonable search space for each parameter
-params_to_tune = [autotune_global.SigmaGlobalParameter(mppi),
-                  autotune_global.HorizonGlobalParameter(mppi),
-                  autotune_global.LambdaGlobalParameter(mppi)]
-
-# be sure to close any figures before ray tune optimization or they will be duplicated
-env.visualize = False
-plt.close('all')
-tuner = autotune_global.AutotuneGlobal(params_to_tune, evaluate_fn=evaluate,
-                                       optimizer=autotune_global.RayOptimizer(HyperOptSearch))
-# ray tuners cannot be tuned iteratively, but you can specify how many iterations to tune for
-res = tuner.optimize_all(100)
-res = tuner.get_best_result()
-tuner.apply_parameters(res.params)
+### 性能诊断
+```bash
+cd tests
+python benchmark_dynamics.py
 ```
 
-For example tuning hyperparameters (with CMA-ES) only on the toy problem (the nominal trajectory is reset each time so they are sampling from noise):
+---
 
-![toy tuning](https://i.imgur.com/2qtYMwu.gif)
+## 📊 工作流程
 
-If you want more than just the best solution found, such as if you want diversity
-across hyperparameter values, or if your evaluation function has large uncertainty,
-then you can directly query past results by
-```python
-for res in tuner.optim.all_res:
-    # the cost
-    print(res.metrics['cost'])
-    # extract the parameters
-    params = tuner.config_to_params(res.config)
-    print(params)
-    # apply the parameters to the controller
-    tuner.apply_parameters(params)
+```
+1. ROS 节点启动 (mppi_ros_test.py)
+   ↓
+2. 加载配置 (mppi_params.yaml)
+   ↓
+3. 创建动力学模型 (dynamics_interface.py)
+   ├─ 运动学模型 (KinematicDynamics)
+   └─ 神经网络模型 (NeuralDynamicsPyTorch)
+   ↓
+4. 初始化 MPPI 算法 (mppi.py)
+   ↓
+5. 订阅话题 (/odom, /global_plan)
+   ↓
+6. 控制主循环 (20Hz)
+   ├─ 更新局部参考路径
+   ├─ 重置动力学模型状态
+   ├─ 采样 K 条轨迹 (mppi.command)
+   ├─ 推演动力学并计算代价
+   ├─ 加权更新控制序列
+   └─ 发布速度指令 (/cmd_vel)
+   ↓
+7. 可视化 (mppi_viz.py)
+   └─ 发布 RViz marker
 ```
 
-Alternatively you can try Quality Diversity optimization using the 
-[CMA-ME optimizer](https://github.com/icaros-usc/pyribs). This optimizer will
-try to optimize for high quality parameters while ensuring there is diversity across
-them. However, it is very slow and you might be better using a `RayOptimizer` and selecting
-for top results while checking for diversity.
-To use it, you need to install
-```python
-pip install ribs
-```
+---
 
-You then use it as
+## ⚙️ 关键参数说明
 
-```python
-import pytorch_mppi.autotune_qd
+### MPPI 算法参数（mppi_params.yaml）
 
-optim = pytorch_mppi.autotune_qd.CMAMEOpt()
-tuner = autotune_global.AutotuneGlobal(params_to_tune, evaluate_fn=evaluate,
-                                       optimizer=optim)
+| 参数 | 默认值 | 说明 |
+|------|-------|------|
+| `horizon` | 20 | 预测步长，越大越能提前规划，但计算慢 |
+| `num_samples` | 300 | 采样轨迹数，越多越接近最优，但计算慢 |
+| `lambda` | 1.0 | 温度系数，越大越随机探索 |
+| `noise_sigma` | [0.5, 0.6] | 控制噪声标准差 [线速度, 角速度] |
+| `control_freq` | 20.0 | 控制频率 (Hz) |
 
-iterations = 10
-for i in range(iterations):
-  # results of this optimization step are returned
-  res = tuner.optimize_step()
-  # we can render the rollouts in the environment
-  best_params = optim.get_diverse_top_parameters(5)
-  for res in best_params:
-    print(res)
-```
+### 代价权重
 
-# Tests
-Under `tests` you can find the `MPPI` method applied to known pendulum dynamics
-and approximate pendulum dynamics (with a 2 layer feedforward net 
-estimating the state residual). Using a continuous angle representation
-(feeding `cos(\theta), sin(\theta)` instead of `\theta` directly) makes
-a huge difference. Although both works, the continuous representation
-is much more robust to controller parameters and random seed. In addition,
-the problem of continuing to spin after over-swinging does not appear.
+| 参数 | 默认值 | 说明 |
+|------|-------|------|
+| `w_cte` | 100.0 | 横向误差权重（最高优先级） |
+| `w_yaw` | 1.0 | 航向误差权重 |
+| `w_vel` | 3.0 | 速度跟踪权重 |
+| `target_velocity` | 0.5 | 目标速度 (m/s) |
 
-Sample result on approximate dynamics with 100 steps of random policy data
-to initialize the dynamics:
+### 动力学模型配置
 
-![pendulum results](https://i.imgur.com/euYQJ25.gif)
+| 参数 | 默认值 | 说明 |
+|------|-------|------|
+| `use_neural` | true | 是否使用神经网络模型 |
+| `backend` | "pytorch" | 后端选择 (pytorch/keras) |
+| `device` | "cpu" | 运行设备 (cpu/cuda) |
+| `use_compile` | false | 是否启用 torch.compile JIT 优化 |
 
-# Related projects
-- [pytorch CEM](https://github.com/LemonPi/pytorch_cem) - an alternative MPC shooting method with similar API as this
-project
-- [pytorch iCEM](https://github.com/UM-ARM-Lab/pytorch_icem) - alternative sampling based MPC
+---
+
+## 🔍 性能优化历程
+
+### Phase 1: Keras 后端
+- 推理时间：~1100 ms (100 粒子 × 20 步)
+- 瓶颈：TensorFlow 开销 + NumPy 转换
+
+### Phase 2: PyTorch 后端
+- 推理时间：~700 ms
+- 加速比：1.6x
+- 优化：减少数据转换 + 向量化标准化
+
+### Phase 3: 优化 PyTorch 后端
+- 推理时间：~700 ms（与 Phase 2 相同）
+- 瓶颈分析：模型推理占 97.4%，数据转换仅 0.2%
+- 结论：CPU 算力瓶颈，GRU 顺序依赖无法批量 rollout
+
+### 实际加速比
+- 验证脚本（纯模型推理）：2.57x
+- MPPI 实际运行：1.6x（受 Python 循环和代价函数开销限制）
+
+---
+
+## 🛠️ 调试建议
+
+### 性能慢？
+1. 降低 `num_samples` (如 100)
+2. 降低 `horizon` (如 10-15)
+3. 使用运动学模型 (`use_neural: false`)
+4. 检查 CPU 占用率（`top` 命令）
+
+### 路径跟踪不准？
+1. 增大 `w_cte` 权重 (如 200-500)
+2. 增大 `num_samples` (如 500-1000)
+3. 调整 `ref_path_length` (如 3-8 米)
+
+### 运动抖动？
+1. 减小 `noise_sigma` (如 [0.3, 0.4])
+2. 增大 `lambda` (如 2.0-5.0)
+
+---
+
+## 📝 注意事项
+
+1. **时间步长一致性**：神经网络训练时的 dt=0.05s，控制频率应为 20Hz
+2. **粒子数限制**：CPU 环境建议 num_samples < 500，否则超过 1s
+3. **模型格式**：PyTorch 后端需要 `.pt` 格式，使用 `convert_keras_to_pytorch.py` 转换
+4. **路径要求**：全局路径至少 2 个点，否则会回退到运动学模型
+
+---
+
+## 📚 参考资料
+
+- MPPI 论文：Williams et al., "Information Theoretic MPC for Model-Based RL" (2017)
+- 开源实现：[pytorch_mppi](https://github.com/UM-ARM-Lab/pytorch_mppi)

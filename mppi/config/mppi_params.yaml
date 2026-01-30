@@ -9,11 +9,11 @@ topics:
   # 定位话题（Odometry 类型）
   # 说明：提供机器人在 world 坐标系下的位姿 [x, y, theta]
   # 当前使用：/odom_calib (base_link_calib 在 world 下的坐标)
-  pose: "/odom_calib"
+  pose: "/odom"
   
   # 速度话题（Odometry 类型）
   # 说明：提供机器人的实际速度，用于动态模型初始化（当前版本暂未使用）
-  twist: "/wheel_odom"
+  twist: "/odom"
   
   # 控制指令发布话题（Twist 类型）
   # 说明：MPPI 输出的速度指令 [linear.x, angular.z]
@@ -21,7 +21,7 @@ topics:
   
   # 全局路径话题（Path 类型）
   # 说明：全局规划器输出的参考路径，MPPI 将跟踪此路径
-  path: "/desired_path"
+  path: "/test_path"
 
 
 # ------------------------------------------------------------
@@ -50,13 +50,13 @@ mppi:
   # 说明：算法向前推演的步数，越大计算量越大但规划越长远
   # 影响：调大 -> 更长远规划，但计算慢；调小 -> 反应快，但可能目光短浅
   # 推荐范围：20-50
-  horizon: 30
+  horizon: 40
   
   # 采样轨迹数量
   # 说明：每次控制循环生成的随机轨迹数，越多越接近全局最优
   # 影响：调大 -> 更优解，但计算慢；调小 -> 快速响应，但可能陷入局部最优
   # 推荐范围：300-1000（CPU 环境建议 500 以下）
-  num_samples: 500
+  num_samples: 300
   
   # 温度系数（lambda）
   # 说明：控制探索与利用的平衡，越大越随机
@@ -68,7 +68,7 @@ mppi:
   # 说明：MPPI 主循环的执行频率
   # 影响：调大 -> 响应更快，但计算压力大；调小 -> 节省资源，但可能响应迟钝
   # 推荐范围：10-30 Hz
-  control_freq: 40.0
+  control_freq: 20.0
   
   # 控制噪声标准差 [线速度, 角速度]
   # 说明：采样时添加到名义轨迹的高斯噪声幅度
@@ -96,7 +96,7 @@ path_tracking:
   # 说明：从全局路径中截取的局部参考路径长度
   # 影响：调大 -> 考虑更远的路径信息；调小 -> 只关注眼前路径
   # 推荐范围：3.0-10.0 米
-  ref_path_length: 4.0
+  ref_path_length: 5.0
 
 
 # ------------------------------------------------------------
@@ -113,13 +113,13 @@ cost_weights:
   # 说明：惩罚机器人朝向与路径切线的偏差
   # 影响：调大 -> 车头必须对准路径方向；调小 -> 允许横着走或倒车
   # 推荐：次高优先级（5-20）
-  w_yaw: 5.0
+  w_yaw: 1.0
   
   # 速度权重
   # 说明：驱动机器人保持目标速度
   # 影响：调大 -> 强制维持速度；调小 -> 允许为了路径精度而减速/倒车
   # 推荐：低优先级（0.1-2.0）
-  w_vel: 0.1
+  w_vel: 3.0
   
   # 目标速度（米/秒）
   # 说明：期望的巡航速度
@@ -141,3 +141,33 @@ control_limits:
   # 说明：转向速度限制
   w_min: -0.4
   w_max: 0.4
+
+
+# ------------------------------------------------------------
+# 7. 动力学模型配置
+# ------------------------------------------------------------
+dynamics:
+  # 是否使用神经网络动力学模型
+  use_neural: true
+  
+  # 后端选择: "pytorch" 或 "keras"
+  # 注意: "pytorch_batch" 已弃用（GRU 无法真正批量 rollout）
+  backend: "pytorch"
+  
+  device: "cpu"
+  
+  # 是否启用 torch.compile() JIT 优化 (PyTorch 2.x)
+  # 首次运行会有编译开销，后续推理可能有 10-20% 加速
+  use_compile: false
+  
+  # PyTorch 模型路径 (.pt 格式)
+  # 使用 convert_keras_to_pytorch.py 从 Keras 模型转换而来
+  pytorch_model_path: "/home/lsk1804/lsk_graduate/lsk_ws/src/NeuralNetwork_for_VehicleDynamicsModeling/models/0129-1216参数-0.32-mppi环境下训练/pytorch_model.pt"
+  
+  # Keras 模型路径 (.h5 格式) - 用于 Keras 后端或回退
+  model_path: "/home/lsk1804/lsk_graduate/lsk_ws/src/NeuralNetwork_for_VehicleDynamicsModeling/models/0129-1216参数-0.32-mppi环境下训练/keras_model_recurrent.h5"
+  
+  # 标准化器路径（两个后端共用）
+  scaler_x_path: "/home/lsk1804/lsk_graduate/lsk_ws/src/NeuralNetwork_for_VehicleDynamicsModeling/models/0129-1216参数-0.32-mppi环境下训练/scaler.plk"
+  
+  scaler_y_path: "/home/lsk1804/lsk_graduate/lsk_ws/src/NeuralNetwork_for_VehicleDynamicsModeling/models/0129-1216参数-0.32-mppi环境下训练/scaler_y.joblib"

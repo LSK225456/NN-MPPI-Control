@@ -1,0 +1,17 @@
+<launch>
+    <!-- ============================================ -->
+    <!-- MPPI 控制器启动文件                           -->
+    <!-- ============================================ -->
+    
+    <!-- 参数：是否使用神经网络模型（可通过命令行覆盖） -->
+    <arg name="use_neural" default="false" doc="是否使用神经网络动力学模型" />
+    
+    <!-- MPPI 控制器节点 -->
+    <node pkg="mppi" type="mppi_ros_test.py" name="mppi_controller" output="screen" respawn="false">
+        <!-- 加载 YAML 参数文件 -->
+        <rosparam file="$(find mppi)/config/mppi_params.yaml" command="load" />
+        
+        <!-- 允许命令行覆盖神经网络开关 -->
+        <param name="dynamics/use_neural" value="$(arg use_neural)" />
+    </node>
+</launch>

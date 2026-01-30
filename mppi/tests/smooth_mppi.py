@@ -525,7 +525,7 @@ def plot_result(ch):
 
 
 def main(plot_only=False):
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cuda" if 0 else "cpu"
     dtype = torch.double
     pytorch_seed.seed(2)
     ch = cache.LocalCache("mppi_res.pkl")
