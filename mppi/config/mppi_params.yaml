@@ -148,7 +148,7 @@ control_limits:
 # ------------------------------------------------------------
 dynamics:
   # 是否使用神经网络动力学模型
-  use_neural: true
+  use_neural: false
   
   # 后端选择: "pytorch" 或 "keras"
   # 注意: "pytorch_batch" 已弃用（GRU 无法真正批量 rollout）
